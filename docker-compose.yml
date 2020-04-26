@@ -144,6 +144,7 @@ services:
 
   spark-worker:
     image: bde2020/spark-worker:2.1.0-hadoop2.8-hive-java8
+    container_name: spark-worker
     environment:
       - "SPARK_MASTER=spark://spark-master:7077"
     environment:
@@ -153,6 +154,7 @@ services:
 
   zeppelin:
     image: apache/zeppelin:0.9.0
+    container_name: zeppelin
     ports:
       - 2000:8080
     volumes:
