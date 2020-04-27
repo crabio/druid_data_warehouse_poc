@@ -37,7 +37,7 @@ x-superset-volumes: &superset-volumes
 services:
     # Need 3.6 or later for container nodes
     zookeeper:
-        # container_name: zookeeper
+        container_name: zookeeper
         image: zookeeper:3.6
         environment:
             - ZOO_MY_ID=1
