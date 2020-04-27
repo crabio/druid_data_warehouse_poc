@@ -1,5 +1,5 @@
 version: "3.7"
-
+        
 volumes:
 # Druid
     metadata_data: {}
@@ -8,6 +8,31 @@ volumes:
     druid_broker_var: {}
     druid_coordinator_var: {}
     druid_router_var: {}
+# Superset
+    superset_home:
+    superset_node_modules:
+    superset_db:
+    redis:
+
+# Superset
+x-superset-build: &superset-build
+    args:
+        NPM_BUILD_CMD: build-dev
+    context: ./
+    dockerfile: Dockerfile
+    target: dev
+x-superset-depends-on: &superset-depends-on
+    - superset_db
+    - redis
+x-superset-volumes: &superset-volumes
+    # /app/pythonpath_docker will be appended to the PYTHONPATH in the final container
+    - ./incubator-superset/docker/docker-init.sh:/app/docker-init.sh
+    - ./incubator-superset/docker/pythonpath_dev:/app/pythonpath
+    - ./incubator-superset/superset:/app/superset
+    - ./incubator-superset/superset-frontend:/app/superset-frontend
+    - superset_node_modules:/app/superset-frontend/superset_node_modules
+    - superset_home:/app/superset_home
+
 
 services:
     # Need 3.6 or later for container nodes
@@ -109,3 +134,126 @@ services:
             - router
         env_file:
             - druid.env
+
+# Superset
+    redis:
+        image: redis:3.2
+        container_name: superset_cache
+        restart: unless-stopped
+        ports:
+            - "6379:6379"
+        volumes:
+            - redis:/data
+
+    superset_db:
+        env_file: superset.env
+        image: postgres:10
+        container_name: superset_db
+        restart: unless-stopped
+        ports:
+            - "5432:5432"
+        volumes:
+            - superset_db:/var/lib/postgresql/data
+
+    superset:
+        env_file: superset.env
+        build: *superset-build
+        container_name: superset_app
+        command: ["flask", "run", "-p", "8088", "--with-threads", "--reload", "--debugger", "--host=0.0.0.0"]
+        restart: unless-stopped
+        ports:
+            - 8088:8088
+        depends_on: *superset-depends-on
+        volumes: *superset-volumes
+
+    superset-init:
+        build: *superset-build
+        container_name: superset_init
+        command: ["/app/docker-init.sh"]
+        env_file: superset.env
+        depends_on: *superset-depends-on
+        volumes: *superset-volumes
+
+    superset-node:
+        image: node:10-jessie
+        container_name: superset_node
+        command: ["bash", "-c", "cd /app/superset-frontend && npm install --global webpack webpack-cli && npm install && npm run dev"]
+        env_file: superset.env
+        depends_on: *superset-depends-on
+        volumes: *superset-volumes
+
+    superset-worker:
+        build: *superset-build
+        container_name: superset_worker
+        command: ["celery", "worker", "--app=superset.tasks.celery_app:app", "-Ofair"]
+        env_file: superset.env
+        restart: unless-stopped
+        depends_on: *superset-depends-on
+        volumes: *superset-volumes
+
+
+# # Zeppelin
+#     namenode:
+#         image: bde2020/hadoop-namenode:1.1.0-hadoop2.8-java8
+#         container_name: namenode
+#         volumes:
+#             - ./data/namenode:/hadoop/dfs/name
+#         environment:
+#             - CLUSTER_NAME=test
+#             - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+#         networks:
+#             - spark-net
+
+#     datanode:
+#         image: bde2020/hadoop-datanode:1.1.0-hadoop2.8-java8
+#         container_name: datanode
+#         volumes:
+#             - ./data/datanode:/hadoop/dfs/data
+#         environment:
+#             - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+#         depends_on:
+#             - namenode
+#         networks:
+#             - spark-net
+
+#     spark-master:
+#         image: bde2020/spark-master:2.1.0-hadoop2.8-hive-java8
+#         container_name: spark-master
+#         ports:
+#             - "8080:8080"
+#             - "7077:7077"
+#         environment:
+#             - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+#         depends_on:
+#             - namenode
+#             - datanode
+#         networks:
+#             - spark-net
+
+#     spark-worker:
+#         image: bde2020/spark-worker:2.1.0-hadoop2.8-hive-java8
+#         environment:
+#             - "SPARK_MASTER=spark://spark-master:7077"
+#         environment:
+#             - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+#         depends_on:
+#             - spark-master
+#         networks:
+#             - spark-net
+
+#     zeppelin:
+#         image: apache/zeppelin:latest
+#         ports:
+#             - 80:8080
+#         volumes:
+#             - ./notebook:/opt/zeppelin/notebook
+#         environment:
+#             CORE_CONF_fs_defaultFS: "hdfs://namenode:8020"
+#             SPARK_MASTER: "spark://spark-master:7077"
+#             MASTER: "spark://spark-master:7077"
+#             #SPARK_SUBMIT_OPTIONS: "--jars /opt/sansa-examples/jars/sansa-examples-spark-2016-12.jar"
+#         depends_on:
+#             - spark-master
+#             - namenode
+#         networks:
+#             - spark-net
