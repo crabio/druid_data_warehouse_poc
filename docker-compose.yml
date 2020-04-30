@@ -1,6 +1,9 @@
 version: "3.7"
         
 volumes:
+# Monitoring
+  prometheus_data: {}
+  grafana_data: {}
 # Druid
   metadata_data: {}
   druid_middle_var: {}
@@ -13,7 +16,7 @@ volumes:
   superset_node_modules:
   superset_db:
   redis:
-
+    
 # Superset
 x-superset-build: &superset-build
   args:
@@ -33,9 +36,84 @@ x-superset-volumes: &superset-volumes
   - superset_node_modules:/app/superset-frontend/superset_node_modules
   - superset_home:/app/superset_home
 
+networks:
+  monitor-net:
 
 services:
-  # Need 3.6 or later for container nodes
+# Monitoring
+  prometheus:
+    image: prom/prometheus:v2.17.2
+    container_name: prometheus
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    networks:
+      - monitor-net
+
+  nodeexporter:
+    image: prom/node-exporter:v0.18.1
+    container_name: nodeexporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+    networks:
+      - monitor-net
+
+  cadvisor:
+    image: gcr.io/google-containers/cadvisor:v0.36.0
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      #- /cgroup:/cgroup:ro #doesn't work on MacOS only for Linux
+    restart: unless-stopped
+    privileged: true
+    networks:
+      - monitor-net
+
+  grafana:
+    image: grafana/grafana:6.7.3
+    container_name: grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    networks:
+      - monitor-net
+
+  pushgateway:
+    image: prom/pushgateway:v1.2.0
+    container_name: pushgateway
+    restart: unless-stopped
+    networks:
+      - monitor-net
+
+# Need 3.6 or later for container nodes
   zookeeper:
     container_name: zookeeper
     image: zookeeper:3.6
